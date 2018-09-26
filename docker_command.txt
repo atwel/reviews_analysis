@@ -1,0 +1,1 @@
+docker run -p 8888:8888 -p 6006:6006 -it -v ~/Desktop:/Desktop -u user -w /home/user tiagopeixoto/graph-tool bash
