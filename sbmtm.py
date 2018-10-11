@@ -432,7 +432,7 @@ class sbmtm():
         '''
         return int(self.g.num_edges()) # no. of types
 
-    def group_to_group_mixture(self,l=0):
+    def group_to_group_mixture(self,l=0,norm=True):
         V = self.get_V()
         D = self.get_D()
         N = self.get_N()
@@ -457,5 +457,7 @@ class sbmtm():
         Bw = len(ind_w)
 
         n_td_tw = n_td_tw[:Bd,Bd:]
-
-        return n_td_tw/np.sum(n_td_tw)
+        if norm == True:
+            return n_td_tw/np.sum(n_td_tw)
+        else:
+            return n_td_tw
