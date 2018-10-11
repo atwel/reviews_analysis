@@ -1,4 +1,4 @@
-import os, json, sys, langdetect, collections, spacy, pandas, re, liwc, readline
+import os, json, sys, langdetect, collections, spacy, pandas, re, liwc, readline, unidecode
 
 """This script does a full cleaning of the reviews and stores the newly cleaned versions in a single Pandas DataFrame for each book.
 
@@ -17,7 +17,38 @@ While I am very much in favor of resolving coreferences, it will likely under-pe
 
 The newly cleaned reviews are stored as individual records in a single Pandas dataframe. Other fields in the dataframe include the delta (i.e. posting date relative to the book's publication date), the user's rating of the book, the number of "up-votes" the review received, and the raw text string.
 """
-CATS = ['affect', 'posemo', 'negemo','anx', 'anger', 'sad',]
+CATS = ['affect', 'posemo', 'negemo','anx', 'anger', 'sad']
+
+def remove_repeat(string,threshold):
+	test = True
+	i = 0
+
+	try:
+		if len(string) >0:
+			while test:
+				start = string[:i]
+				results = re.search(start,string[i:])
+				if results != None:
+					i += 1
+				else:
+					test = False
+
+		if i < threshold:
+			return(string)
+		else:
+			if string[-5:]==" more":
+				return string[i-1:-5] # removing a "more" on the end of the long paragraphs
+			else:
+				if string[:i].strip() == string[i:].strip():
+					print("weird corner:", string)
+					print("returned",string[:i])
+					return string[:i]
+				else:
+					a = t
+	except:
+			print(i, threshold)
+			correct_input = input("What should this review be?  {}:   ".format(string))
+			return correct_input
 
 def liwc_parse(sentence):
 	counts = liwc.from_tokens(sentence)
@@ -32,13 +63,12 @@ def liwc_parse(sentence):
 
 nlp = spacy.load('en_coref_lg') # Using the large (coreference) model
 
-nlp.Defaults.stop_words |= {".","!","?",";",":",",","/","&",'-',"--","\n", " "}
+nlp.Defaults.stop_words |= {".","!","?",";",":",",","/","\"","&",'-',"--","\n","&amp","u0026amp"," ","b","c","d", "e","f","g","h", "j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"}
 # OK, we iterate over all the books.
-for directory, sub, files in os.walk("./posts/"):
+for directory, sub, files in os.walk("../../posts/"):
 	book_dir = directory.split("/")[-1] #Book id+name
 	# In case the script stops with an error, we make sure the current book hasn't already been done
-	if not os.path.exists("./cleaned_posts/"+book_dir+".json"):
-		#os.mkdir("./cleaned_posts/"+book_dir) #creating directory for cleaned reviews
+	if not os.path.exists("./cleaned_posts/"+book_dir+".json"): # should have not after if.
 
 		print("cleaning {}".format(book_dir))
 
@@ -46,10 +76,14 @@ for directory, sub, files in os.walk("./posts/"):
 		for file in files:
 
 			if ".json" in file: # Some times there are ".DS_Store" and other files in the folder
-				with open(directory+"/"+file, "r",encoding="utf8") as f:
+				with open(directory+"/"+file, "r",encoding="ascii") as f:
 					book_dictionary = json.loads(f.read()) # records are stored in the JSON format
-					review = " ".join(book_dictionary["doc"]) # the reviews are already tokenized.
-
+					temp = " ".join(book_dictionary["doc"]) # the reviews are already tokenized.
+					try:
+						review = remove_repeat(unidecode.unidecode(temp),25)
+					except:
+						print(review)
+						raise ValueError("some value error")
 					try:
 						# we only continue with the processing if the text is in English.
 						if langdetect.detect(review) == "en":
@@ -65,7 +99,15 @@ for directory, sub, files in os.walk("./posts/"):
 								coref_doc = doc
 
 							# Now we have the resolved and lemmatized text and we can stoplist it
-							stoplisted = [token for token in coref_doc if token.text not in nlp.Defaults.stop_words]
+							stoplisted = []
+							removed_words = []
+							for token in coref_doc:
+								if token.text not in nlp.Defaults.stop_words:
+									stoplisted.append(token)
+								else:
+									removed_words.append(token.text)
+							removed_words = list(set(removed_words))
+
 
 							# The above stoplists on token.text because the token itself doesn't evaluate to the actual word. We save the token because the lemma is attached to the token and we need the lemmas next.
 
@@ -76,6 +118,7 @@ for directory, sub, files in os.walk("./posts/"):
 							#We now have the bag of words we want and we can pack the data up again
 
 							record["doc"] = resolved_doc
+							record["removed_words"] = removed_words
 							record["name"] = file
 							record['raw_text'] = review
 							parsed= liwc_parse(resolved_doc)
@@ -108,22 +151,30 @@ for directory, sub, files in os.walk("./posts/"):
 		# Now we remove the isolated words and pack the data up for storage.
 		for record in records:
 			text = record["doc"]
-			stop_listed_text = [word for word in text if word not in isolates]
-			# Keep only if length is greater than 10
+			iso_stopped = []
+			stop_listed_text = []
+			for word in text:
+				if word not in isolates:
+					stop_listed_text.append(word)
+				else:
+					iso_stopped.append(word)
+			if type(record["ups"]) == int:
+				likes = record["ups"]
+			else:
+				likes = int(record["ups"].replace(" likes","").replace(" like",""))
 
-			if len(stop_listed_text) > 10:
-				data = {"name": record["name"],
-							"text": stop_listed_text,
+			record["removed_words"].extend(iso_stopped)
+			new_data = {
+							"doc": stop_listed_text,
 							"word_count": len(stop_listed_text),
-							"delta": record["delta"],
-							"likes": record["ups"],
-							"raw_text":record["raw_text"]
+							"ups": likes
 							}
+			record.update(new_data)
 
-				frames[index] = pandas.Series(data)
-				index += 1
+			frames[index] = pandas.Series(record)
+			index += 1
 
 		master_frame = pandas.DataFrame(frames)
 
 		with open("./cleaned_posts/"+book_dir+".json","w") as fprime:
-			fprime.write(master_frame.to_json())
+			fprime.write(master_frame.T.to_json())

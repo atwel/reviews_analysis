@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import os,sys,argparse
 from collections import Counter,defaultdict
-import pickle
+import pickle, time
 import graph_tool.all as gt
 
 
@@ -58,6 +58,8 @@ class sbmtm():
         ## add all documents and words as nodes
         ## add all tokens as links
         for i_d in range(D):
+            if i_d %1000 == 0:
+                print("Reached {}th node".format(i_d))
             title = list_titles[i_d]
             text = list_texts[i_d]
 
@@ -95,7 +97,7 @@ class sbmtm():
         self.documents = [ self.g.vp['name'][v] for v in  self.g.vertices() if self.g.vp['kind'][v]==0   ]
 
 
-    def fit(self,overlap = False, hierarchical = True):
+    def fit(self, min_blocks=3,overlap = False, hierarchical = True,verbose=False):
         '''
         Fit the sbm to the word-document network.
         - overlap, bool (default: False). Overlapping or Non-overlapping groups.
@@ -118,7 +120,9 @@ class sbmtm():
             ## the inference
             state = gt.minimize_nested_blockmodel_dl(g, deg_corr=True,
                                                      overlap=overlap,
-                                                     state_args=state_args)
+													 B_min=min_blocks,
+                                                     state_args=state_args,
+													 verbose=verbose)
 
             self.state = state
             ## minimum description length
