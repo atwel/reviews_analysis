@@ -23,9 +23,14 @@ class sbmtm():
         self.mdl = np.nan ## minimum description length of inferred state
         self.L = np.nan ## number of levels in hierarchy
 
-    def make_graph(self,list_texts, documents = None, counts=True):
+    def make_graph(self,list_texts, documents = None, counts=True, n_min = None):
         '''
         Load a corpus and generate the word-document network
+
+        optional arguments:
+        - documents: list of str, titles of documents
+        - counts: save edge-multiplicity as counts (default: True)
+        - n_min, int: filter all word-nodes with less than n_min counts (default None)
         '''
         D = len(list_texts)
 
@@ -75,6 +80,24 @@ class sbmtm():
                 else:
                     for n in range(count):
                         g.add_edge(d,w)
+
+        ## filter word-types with less than n_min counts
+        if n_min is not None:
+            v_n = g.new_vertex_property("int")
+            for v in g.vertices():
+                v_n[v] = v.out_degree()
+
+            v_filter =  g.new_vertex_property("bool")
+            for v in g.vertices():
+                if v_n[v] < n_min and g.vp['kind'][v]==1:
+                    v_filter[v] = False
+                else:
+                    v_filter[v] = True    
+            g.set_vertex_filter(v_filter)
+            g.purge_vertices()
+            g.clear_filters()
+
+
         self.g = g
         self.words = [ g.vp['name'][v] for v in  g.vertices() if g.vp['kind'][v]==1   ]
         self.documents = [ g.vp['name'][v] for v in  g.vertices() if g.vp['kind'][v]==0   ]
@@ -132,23 +155,31 @@ class sbmtm():
             self.state = state
             ## minimum description length
             self.mdl = state.entropy()
-            ## collect group membership for each level in the hierarchy
             L = len(state.levels)
-            dict_groups_L = {}
-
-            ## only trivial bipartite structure
             if L == 2:
                 self.L = 1
-                for l in range(L-1):
-                    dict_groups_l = self.get_groups(l=l)
-                    dict_groups_L[l] = dict_groups_l
-            ## omit trivial levels: l=L-1 (single group), l=L-2 (bipartite)
             else:
                 self.L = L-2
-                for l in range(L-2):
-                    dict_groups_l = self.get_groups(l=l)
-                    dict_groups_L[l] = dict_groups_l
-            self.groups = dict_groups_L
+
+            ## do not calculate group memberships right away -- matrices are too large
+
+            ## collect group membership for each level in the hierarchy
+            
+            # dict_groups_L = {}
+
+            # ## only trivial bipartite structure
+            # if L == 2:
+            #     self.L = 1
+            #     for l in range(L-1):
+            #         dict_groups_l = self.get_groups(l=l)
+            #         dict_groups_L[l] = dict_groups_l
+            # ## omit trivial levels: l=L-1 (single group), l=L-2 (bipartite)
+            # else:
+            #     self.L = L-2
+            #     for l in range(L-2):
+            #         dict_groups_l = self.get_groups(l=l)
+            #         dict_groups_L[l] = dict_groups_l
+            # self.groups = dict_groups_L
 
     def plot(self, filename = None,nedges = 1000):
         '''
@@ -166,7 +197,9 @@ class sbmtm():
         get the n most common words for each word-group in level l.
         return tuples (word,P(w|tw))
         '''
-        dict_groups = self.groups[l]
+        # dict_groups = self.groups[l]
+        dict_groups = self.get_groups(l=l)
+
         Bw = dict_groups['Bw']
         p_w_tw = dict_groups['p_w_tw']
 
@@ -187,7 +220,9 @@ class sbmtm():
         return dict_group_words
 
     def topicdist(self, doc_index, l=0):
-        dict_groups =  self.groups[l]
+        # dict_groups =  self.groups[l]
+        dict_groups = self.get_groups(l=l)
+
         p_tw_d = dict_groups['p_tw_d']
         list_topics_tw = []
         for tw,p_tw in enumerate(p_tw_d[:,doc_index]):
@@ -201,7 +236,8 @@ class sbmtm():
         For the non-overlapping case, each document belongs to one and only one group with prob 1.
 
         '''
-        dict_groups = self.groups[l]
+        # dict_groups = self.groups[l]
+        dict_groups = self.get_groups(l=l)
         Bd = dict_groups['Bd']
         p_td_d = dict_groups['p_td_d']
 
@@ -226,7 +262,8 @@ class sbmtm():
         Note: Works only for non-overlapping model.
         For overlapping case, we need something else.
         '''
-        dict_groups = self.groups[l]
+        # dict_groups = self.groups[l]
+        dict_groups = self.get_groups(l=l)
         Bd = dict_groups['Bd']
         p_td_d = dict_groups['p_td_d']
 
@@ -253,7 +290,8 @@ class sbmtm():
             - word-nodes, p_tw_w, array with shape Bw x V
         It gives the probability of a nodes belonging to one of the groups.
         '''
-        dict_groups = self.groups[l]
+        # dict_groups = self.groups[l]
+        dict_groups = self.get_groups(l=l)
         p_tw_w = dict_groups['p_tw_w']
         p_td_d = dict_groups['p_td_d']
         return p_td_d,p_tw_w
@@ -466,3 +504,22 @@ class sbmtm():
             return n_td_tw/np.sum(n_td_tw)
         else:
             return n_td_tw
+
+    def pmi_td_tw(self,l=0):
+        '''
+        Point-wise mutual information between topic-groups and doc-groups, S(td,tw)
+        This is an array of shape Bd x Bw.
+
+        It corresponds to
+        S(td,tw) = log P(tw | td) / \tilde{P}(tw | td) .
+
+        This is the log-ratio between 
+        P(tw | td) == prb of topic tw in doc-group td;
+        \tilde{P}(tw | td) = P(tw) expected prob of topic tw in doc-group td under random null model.
+        '''
+        p_td_tw = self.group_to_group_mixture(l=l)
+        p_tw_td = p_td_tw.T
+        p_td = np.sum(p_tw_td,axis=0)
+        p_tw = np.sum(p_tw_td,axis=1)
+        pmi_td_tw = np.log(p_tw_td/(p_td*p_tw[:,np.newaxis])).T
+        return pmi_td_tw
