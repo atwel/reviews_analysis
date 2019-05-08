@@ -120,65 +120,68 @@ class sbmtm():
         self.documents = [ self.g.vp['name'][v] for v in  self.g.vertices() if self.g.vp['kind'][v]==0   ]
 
 
-    def fit(self, min_blocks=3,overlap = False, hierarchical = True,verbose=False):
-        '''
-        Fit the sbm to the word-document network.
-        - overlap, bool (default: False). Overlapping or Non-overlapping groups.
-            Overlapping not implemented yet
-        - hierarchical, bool (default: True). Hierarchical SBM or Flat SBM.
-            Flat SBM not implemented yet.
-        - Bmin, int (default:None): pass an option to the graph-tool inference specifying the minimum number of blocks.
-        - n_init, int (default:1): number of different initial conditions to run in order to avoid local minimum of MDL.
-        '''
-        g = self.g
-        if g is None:
-            print('No data to fit the SBM. Load some data first (make_graph)')
-        else:
-            if overlap and "count" in g.ep:
-                raise ValueError("When using overlapping SBMs, the graph must be constructed with 'counts=False'")
-            clabel = g.vp['kind']
-
-            state_args = {'clabel': clabel, 'pclabel': clabel}
-            if "count" in g.ep:
-                state_args["eweight"] = g.ep.count
-
-            ## the inference
-            mdl = np.inf ##
-            for i_n_init in range(n_init):
-                state_tmp = gt.minimize_nested_blockmodel_dl(g, deg_corr=True,
-                                                     overlap=overlap,
-													 B_min=min_blocks,
-                                                     state_args=state_args,
-													 verbose=verbose)
-
-            self.state = state
-            ## minimum description length
-            self.mdl = state.entropy()
-            L = len(state.levels)
-            if L == 2:
-                self.L = 1
+    def fit(self,overlap = False, hierarchical = True, B_min = None, n_init = 1):
+            '''
+            Fit the sbm to the word-document network.
+            - overlap, bool (default: False). Overlapping or Non-overlapping groups.
+                Overlapping not implemented yet
+            - hierarchical, bool (default: True). Hierarchical SBM or Flat SBM.
+                Flat SBM not implemented yet.
+            - Bmin, int (default:None): pass an option to the graph-tool inference specifying the minimum number of blocks.
+            - n_init, int (default:1): number of different initial conditions to run in order to avoid local minimum of MDL.
+            '''
+            g = self.g
+            if g is None:
+                print('No data to fit the SBM. Load some data first (make_graph)')
             else:
-                self.L = L-2
+                if overlap and "count" in g.ep:
+                    raise ValueError("When using overlapping SBMs, the graph must be constructed with 'counts=False'")
+                clabel = g.vp['kind']
 
-            ## do not calculate group memberships right away -- matrices are too large
+                state_args = {'clabel': clabel, 'pclabel': clabel}
+                if "count" in g.ep:
+                    state_args["eweight"] = g.ep.count
 
-            ## collect group membership for each level in the hierarchy
+                ## the inference
+                mdl = np.inf ##
+                for i_n_init in range(n_init):
+                    state_tmp = gt.minimize_nested_blockmodel_dl(g, deg_corr=True,
+                                                         overlap=overlap,
+                                                         state_args=state_args,
+                                                         B_min = B_min)
+                    mdl_tmp = state_tmp.entropy()
+                    if mdl_tmp < mdl:
+                        mdl = 1.0*mdl_tmp
+                        state = state_tmp.copy()
 
-            # dict_groups_L = {}
+                self.state = state
+                ## minimum description length
+                self.mdl = state.entropy()
+                L = len(state.levels)
+                if L == 2:
+                    self.L = 1
+                else:
+                    self.L = L-2
 
-            # ## only trivial bipartite structure
-            # if L == 2:
-            #     self.L = 1
-            #     for l in range(L-1):
-            #         dict_groups_l = self.get_groups(l=l)
-            #         dict_groups_L[l] = dict_groups_l
-            # ## omit trivial levels: l=L-1 (single group), l=L-2 (bipartite)
-            # else:
-            #     self.L = L-2
-            #     for l in range(L-2):
-            #         dict_groups_l = self.get_groups(l=l)
-            #         dict_groups_L[l] = dict_groups_l
-            # self.groups = dict_groups_L
+                ## do not calculate group memberships right away -- matrices are too large
+
+                ## collect group membership for each level in the hierarchy
+
+                # dict_groups_L = {}
+
+                # ## only trivial bipartite structure
+                # if L == 2:
+                #     self.L = 1
+                #     for l in range(L-1):
+                #         dict_groups_l = self.get_groups(l=l)
+                #         dict_groups_L[l] = dict_groups_l
+                # ## omit trivial levels: l=L-1 (single group), l=L-2 (bipartite)
+                # else:
+                #     self.L = L-2
+                #     for l in range(L-2):
+                #         dict_groups_l = self.get_groups(l=l)
+                #         dict_groups_L[l] = dict_groups_l
+    # self.groups = dict_groups_L
 
     def plot(self, filename = None,nedges = 1000):
         '''
